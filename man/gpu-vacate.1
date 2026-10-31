@@ -1,0 +1,210 @@
+.TH GPU\-VACATE 1 2026-10-30 "gpu-vacate 0.1.0" "User Commands"
+.\" No hyphenation (it splits file names) and no justification
+.nh
+.ds AD l
+.SH NAME
+gpu\-vacate \- move the GNOME desktop off the discrete GPU
+.SH SYNOPSIS
+.B gpu\-vacate
+.RB [ status ]
+.br
+.B gpu\-vacate
+.BR on " | " off
+.br
+.B gpu\-vacate
+.BR inputs " | " sync " | " version " | " help
+.SH DESCRIPTION
+.B gpu\-vacate
+moves the GNOME desktop from the discrete GPU (dGPU) to the integrated GPU (iGPU), so that
+the dGPU's VRAM and compute are left entirely to other work such as machine learning,
+and moves it back again.
+It is meant for desktop PCs with one monitor connected to both GPUs, for example
+DisplayPort from the graphics card and HDMI from the motherboard.
+.PP
+A switch takes effect at the next login, because mutter chooses the GPU it renders
+with when GNOME starts.
+On a switch,
+.B gpu\-vacate
+also turns off the output on the other GPU, saves that monitor layout, and points the
+monitor at the right input over DDC/CI.
+.PP
+The mode is kept in
+.IR /run ,
+so every boot starts in normal mode with the desktop on the dGPU.
+.SH COMMANDS
+.TP
+.B status
+Show the mode, the GPU the current GNOME session renders on, and for each GPU its PCI
+address and ID, driver, VRAM use and connected outputs.
+A GPU that is runtime-suspended is shown as suspended, because reading its VRAM use
+would wake it.
+This is the default command.
+.TP
+.BR on " (alias " igpu )
+Render the desktop on the iGPU.
+This turns on the iGPU's output, turns off the dGPU's, and switches the monitor's input.
+GNOME then asks whether to keep the new display settings: click
+.BR "Keep Changes" ,
+which is what saves the layout, then press Enter in the terminal.
+.B gpu\-vacate
+then offers to log out; the next login renders on the iGPU.
+It refuses to switch if nothing is connected to the iGPU.
+.TP
+.BR off " (alias " dgpu )
+Render the desktop on the dGPU again, the same way.
+.TP
+.B inputs
+For each connected output, show its I2C bus and the input code (DDC/CI VCP feature 0x60)
+that the monitor reports.
+Run it once with the monitor on each input to find the values for
+.B INPUT_DGPU
+and
+.BR INPUT_IGPU .
+Needs
+.BR ddcutil (1).
+.TP
+.B sync
+Make the outputs and the monitor input match the current mode, without asking.
+Changes made this way last for the session only.
+It runs at every GNOME login from
+.IR /etc/xdg/autostart/gpu\-vacate\-sync.desktop ,
+for example to turn the dGPU's output back on after a reboot from vacated mode.
+.TP
+.B version
+Print the version.
+.TP
+.B help
+Print a usage summary.
+.TP
+.B firmware\-input
+Used by
+.BR gpu\-vacate\-firmware\-input.service ,
+which runs it as root at boot, before the login screen starts, and at shutdown, after it
+stops.
+It switches the monitor to the boot GPU's input, so the firmware setup, the boot loader
+and other operating systems are visible.
+It does nothing while the desktop is vacated and the display manager is running.
+.SH CONFIGURATION
+Settings are read from
+.I /etc/gpu\-vacate.conf
+by the user command and by the boot and shutdown service.
+The file is sourced by
+.BR bash (1),
+so it uses shell syntax:
+.IR NAME = value .
+.TP
+.B DESKTOP_GPU
+The GPU the desktop moves to.
+Empty (the default): the integrated GPU, found automatically.
+Otherwise a PCI ID
+.RI ( vendor : device ,
+such as
+.BR 1002:164e )
+or a PCI address (such as
+.BR 0000:5c:00.0 ),
+as shown by
+.BR "gpu\-vacate status" .
+Prefer the ID: addresses can change when a card is added or removed.
+.TP
+.BR INPUT_DGPU ", " INPUT_IGPU
+The monitor's input codes for the cable from each GPU, in hex (such as
+.BR 0x0f ).
+Empty (the default): the input is left alone, and you switch it from the monitor's menu.
+The MCCS standard assigns 0x0f to DisplayPort\-1, 0x10 to DisplayPort\-2, 0x11 to HDMI\-1
+and 0x12 to HDMI\-2, but monitors differ; use
+.B gpu\-vacate inputs
+to read yours.
+.TP
+.B FIRMWARE_INPUT
+.B yes
+(the default) to switch the monitor to the boot GPU's input at boot and shutdown, or
+.B no
+to leave it alone.
+Needs the input codes.
+.SH ENVIRONMENT
+.TP
+.B GPU_VACATE_CONF
+Read settings from this file instead of
+.IR /etc/gpu\-vacate.conf .
+.SH FILES
+.TP
+.I /etc/gpu\-vacate.conf
+Settings.
+.TP
+.IR /run/gpu\-vacate/card N
+Exists while the desktop is vacated to card
+.IR N .
+The directory is recreated empty at every boot and is writable by the
+.B gpu\-vacate
+group; only its members can switch.
+.TP
+.I /etc/udev/rules.d/61\-gpu\-vacate.rules
+Tags the card named by the flag file with
+.BR mutter\-device\-preferred\-primary ,
+which makes mutter render on it.
+.TP
+.I gpu\-vacate\-trigger.path
+Re-runs udev on the GPUs whenever the flag directory changes.
+.TP
+.I gpu\-vacate\-firmware\-input.service
+Runs
+.B gpu\-vacate firmware\-input
+at boot and shutdown.
+.TP
+.I ~/.config/monitors.xml
+GNOME's saved monitor layouts, which
+.B on
+and
+.B off
+update.
+.SH EXIT STATUS
+0 on success, 1 on an error or an unknown command.
+.SH EXAMPLES
+Find the monitor's input codes, then vacate the dGPU:
+.PP
+.RS
+.nf
+$ gpu\-vacate inputs        # monitor showing the dGPU's input
+$ gpu\-vacate inputs        # after switching it to the iGPU's input by hand
+$ sudoedit /etc/gpu\-vacate.conf
+$ gpu\-vacate on
+.fi
+.RE
+.PP
+After logging back in, check that the dGPU is idle:
+.PP
+.RS
+.nf
+$ gpu\-vacate status
+.fi
+.RE
+.SH NOTES
+Requires GNOME 48 or newer on Wayland, for
+.BR gdctl (1).
+Mutter reads its udev tags when GNOME starts, so a switch always needs a log out and
+back in.
+.PP
+Mutter's
+.B mutter\-device\-ignore
+tag would hide the dGPU completely, but mutter reads it from udev's sticky tag list, so it
+cannot be removed again until a reboot.
+.B gpu\-vacate
+only uses
+.BR mutter\-device\-preferred\-primary ,
+which mutter reads from the current tags.
+.PP
+GNOME keeps one saved layout per set of connected monitors.
+Adding or removing a GPU renames the connectors, which GNOME treats as a new set, so
+settings such as scaling may need to be set again once.
+.PP
+Some monitors only advertise their native resolution in the DisplayPort EDID.
+If the iGPU's HDMI output lacks it, add a mode with a kernel parameter such as
+.BR video=HDMI\-A\-3:5120x1440MR@60 .
+.SH SEE ALSO
+.BR gdctl (1),
+.BR ddcutil (1),
+.BR gnome\-shell (1),
+.BR udev (7),
+.BR systemd.path (5)
+.PP
+https://github.com/matthewlenz/gpu\-vacate

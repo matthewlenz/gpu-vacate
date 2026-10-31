@@ -1,0 +1,8 @@
+[Unit]
+Description=Watch the gpu-vacate flag directory
+
+[Path]
+PathChanged=/run/gpu-vacate
+
+[Install]
+WantedBy=paths.target

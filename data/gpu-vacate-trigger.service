@@ -1,0 +1,6 @@
+[Unit]
+Description=Re-apply the GPU udev tags for gpu-vacate
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/udevadm trigger --settle --subsystem-match=drm --sysname-match=card[0-9]* --action=change

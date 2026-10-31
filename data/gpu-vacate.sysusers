@@ -1,0 +1,2 @@
+# Members may switch the desktop GPU with gpu-vacate
+g gpu-vacate -

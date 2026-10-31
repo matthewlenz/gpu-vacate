@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=gpu-vacate sync
+Comment=Enable only the display output of the GPU the desktop renders on
+Exec=@BINDIR@/gpu-vacate sync
+OnlyShowIn=GNOME;
+NoDisplay=true
+X-GNOME-Autostart-Phase=Applications

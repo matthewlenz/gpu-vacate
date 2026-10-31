@@ -1,0 +1,2 @@
+# Flag directory for gpu-vacate, writable by the gpu-vacate group, empty at every boot
+d /run/gpu-vacate 0775 root gpu-vacate -

@@ -1,0 +1,5 @@
+# gpu-vacate: GNOME renders on the GPU named by a flag file in /run/gpu-vacate (e.g.
+# /run/gpu-vacate/card2). Only this tag is used: mutter reads it from udev's current
+# tags, so it can be toggled without a reboot. (mutter-device-ignore can't: mutter reads
+# it from the sticky tag list, so it would stay set until the next reboot.)
+SUBSYSTEM=="drm", ENV{DEVTYPE}=="drm_minor", KERNEL=="card[0-9]*", PROGRAM="/usr/bin/test -e /run/gpu-vacate/%k", TAG+="mutter-device-preferred-primary"

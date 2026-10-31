@@ -1,0 +1,10 @@
+# bash completion for gpu-vacate. bash-completion loads it on first use from
+# $PREFIX/share/bash-completion/completions/gpu-vacate.
+_gpu_vacate() {
+  local cur=${COMP_WORDS[COMP_CWORD]}
+  COMPREPLY=()
+  (( COMP_CWORD == 1 )) || return 0
+  # firmware-input is for the systemd service; igpu/dgpu are aliases of on/off
+  mapfile -t COMPREPLY < <(compgen -W 'status on off inputs sync version help' -- "$cur")
+}
+complete -F _gpu_vacate gpu-vacate
