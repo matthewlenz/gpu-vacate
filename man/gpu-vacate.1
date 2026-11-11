@@ -9,7 +9,11 @@ gpu\-vacate \- move the GNOME desktop off the discrete GPU
 .RB [ status ]
 .br
 .B gpu\-vacate
-.BR on " | " off
+.B on
+.RB [ \-\-keep ]
+.br
+.B gpu\-vacate
+.B off
 .br
 .B gpu\-vacate
 .BR inputs " | " sync " | " version " | " help
@@ -30,7 +34,9 @@ monitor at the right input over DDC/CI.
 .PP
 The mode is kept in
 .IR /run ,
-so every boot starts in normal mode with the desktop on the dGPU.
+so every boot starts in normal mode with the desktop on the dGPU, unless it was vacated
+with
+.BR "on \-\-keep" .
 .SH COMMANDS
 .TP
 .B status
@@ -40,8 +46,21 @@ A GPU that is runtime-suspended is shown as suspended, because reading its VRAM 
 would wake it.
 This is the default command.
 .TP
-.BR on " (alias " igpu )
-Render the desktop on the iGPU.
+.BR on " (alias " igpu ") [" \-\-keep ]
+Render the desktop on the iGPU, until the next reboot.
+With
+.B \-\-keep
+(or
+.BR \-k ),
+stay vacated across reboots until
+.BR off :
+every boot then renders the login screen and the desktop on the iGPU, and switches the
+monitor to the iGPU's input before the login screen starts.
+Running
+.B on
+again, with or without
+.BR \-\-keep ,
+changes whether the mode is kept.
 This turns on the iGPU's output, turns off the dGPU's, and switches the monitor's input.
 GNOME then asks whether to keep the new display settings: click
 .BR "Keep Changes" ,
@@ -51,7 +70,8 @@ then offers to log out; the next login renders on the iGPU.
 It refuses to switch if nothing is connected to the iGPU.
 .TP
 .BR off " (alias " dgpu )
-Render the desktop on the dGPU again, the same way.
+Render the desktop on the dGPU again, the same way, and forget
+.BR \-\-keep .
 .TP
 .B inputs
 For each connected output, show its I2C bus and the input code (DDC/CI VCP feature 0x60)
@@ -76,13 +96,26 @@ Print the version.
 .B help
 Print a usage summary.
 .TP
-.B firmware\-input
+.B restore
+Used by
+.BR gpu\-vacate\-restore.service ,
+which runs it as root at boot, before the login screen starts, if
+.B on \-\-keep
+was used.
+It recreates the flag in
+.I /run/gpu\-vacate
+for the desktop GPU.
+.TP
+.BR firmware\-input " " boot | shutdown
 Used by
 .BR gpu\-vacate\-firmware\-input.service ,
 which runs it as root at boot, before the login screen starts, and at shutdown, after it
 stops.
 It switches the monitor to the boot GPU's input, so the firmware setup, the boot loader
 and other operating systems are visible.
+At boot after a
+.B restore
+it switches to the iGPU's input instead.
 It does nothing while the desktop is vacated and the display manager is running.
 .SH CONFIGURATION
 Settings are read from
@@ -137,6 +170,20 @@ Exists while the desktop is vacated to card
 The directory is recreated empty at every boot and is writable by the
 .B gpu\-vacate
 group; only its members can switch.
+.TP
+.I /var/lib/gpu\-vacate/keep
+Exists after
+.BR "on \-\-keep" ,
+until
+.BR off .
+Writable by the
+.B gpu\-vacate
+group.
+.TP
+.I gpu\-vacate\-restore.service
+Runs
+.B gpu\-vacate restore
+at boot when the keep file exists.
 .TP
 .I /etc/udev/rules.d/61\-gpu\-vacate.rules
 Tags the card named by the flag file with

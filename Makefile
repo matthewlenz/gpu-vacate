@@ -13,7 +13,7 @@ MANDIR       ?= $(PREFIX)/share/man
 
 VERSION := $(shell sed -n 's/^VERSION=//p' gpu-vacate)
 
-UNITS = gpu-vacate-trigger.path gpu-vacate-firmware-input.service
+UNITS = gpu-vacate-trigger.path gpu-vacate-restore.service gpu-vacate-firmware-input.service
 
 FILES = $(BINDIR)/gpu-vacate \
 	$(UDEVRULESDIR)/61-gpu-vacate.rules \
@@ -21,6 +21,7 @@ FILES = $(BINDIR)/gpu-vacate \
 	$(SYSUSERSDIR)/gpu-vacate.conf \
 	$(UNITDIR)/gpu-vacate-trigger.path \
 	$(UNITDIR)/gpu-vacate-trigger.service \
+	$(UNITDIR)/gpu-vacate-restore.service \
 	$(UNITDIR)/gpu-vacate-firmware-input.service \
 	$(AUTOSTARTDIR)/gpu-vacate-sync.desktop \
 	$(BASHCOMPDIR)/gpu-vacate \
@@ -43,9 +44,12 @@ install:
 	install -d $(DESTDIR)$(UNITDIR) $(DESTDIR)$(AUTOSTARTDIR)
 	sed 's|@BINDIR@|$(BINDIR)|g' data/gpu-vacate-firmware-input.service.in \
 		> $(DESTDIR)$(UNITDIR)/gpu-vacate-firmware-input.service
+	sed 's|@BINDIR@|$(BINDIR)|g' data/gpu-vacate-restore.service.in \
+		> $(DESTDIR)$(UNITDIR)/gpu-vacate-restore.service
 	sed 's|@BINDIR@|$(BINDIR)|g' data/gpu-vacate-sync.desktop.in \
 		> $(DESTDIR)$(AUTOSTARTDIR)/gpu-vacate-sync.desktop
 	chmod 644 $(DESTDIR)$(UNITDIR)/gpu-vacate-firmware-input.service \
+		$(DESTDIR)$(UNITDIR)/gpu-vacate-restore.service \
 		$(DESTDIR)$(AUTOSTARTDIR)/gpu-vacate-sync.desktop
 	@# Never overwrite the admin's settings
 	[ -e $(DESTDIR)$(SYSCONFDIR)/gpu-vacate.conf ] || \
@@ -71,7 +75,7 @@ ifeq ($(DESTDIR),)
 endif
 	rm -f $(addprefix $(DESTDIR),$(FILES))
 ifeq ($(DESTDIR),)
-	rm -rf /run/gpu-vacate
+	rm -rf /run/gpu-vacate /var/lib/gpu-vacate
 	systemctl daemon-reload
 	udevadm control --reload
 	udevadm trigger --subsystem-match=drm --action=change

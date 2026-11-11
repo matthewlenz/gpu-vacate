@@ -1,8 +1,9 @@
 # Points the monitor at the boot GPU's input at boot (before the login screen) and at
-# shutdown (after it), so the firmware, boot loader and other OSes are visible.
+# shutdown (after it), so the firmware, boot loader and other OSes are visible. If
+# gpu-vacate-restore.service kept the desktop vacated, the boot run picks the iGPU's input.
 [Unit]
 Description=Switch the monitor to the boot GPU's input at boot and shutdown (gpu-vacate)
-After=systemd-modules-load.service
+After=systemd-modules-load.service gpu-vacate-restore.service
 Before=display-manager.service
 
 [Service]
@@ -11,8 +12,8 @@ RemainAfterExit=yes
 # ddcutil keeps per-monitor timing data in the XDG cache, and root services have no home
 CacheDirectory=gpu-vacate
 Environment=XDG_CACHE_HOME=%C/gpu-vacate
-ExecStart=@BINDIR@/gpu-vacate firmware-input
-ExecStop=@BINDIR@/gpu-vacate firmware-input
+ExecStart=@BINDIR@/gpu-vacate firmware-input boot
+ExecStop=@BINDIR@/gpu-vacate firmware-input shutdown
 TimeoutSec=45
 
 [Install]
