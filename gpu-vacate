@@ -10,7 +10,7 @@
 # unless `on --keep` left a mark in /var/lib/gpu-vacate: then a boot service recreates it.
 set -euo pipefail
 
-VERSION=0.1.0
+VERSION=0.2.0
 CONF=${GPU_VACATE_CONF:-/etc/gpu-vacate.conf}
 RUNDIR=/run/gpu-vacate
 STATEDIR=/var/lib/gpu-vacate
