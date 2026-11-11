@@ -1,2 +1,4 @@
 # Flag directory for gpu-vacate, writable by the gpu-vacate group, empty at every boot
 d /run/gpu-vacate 0775 root gpu-vacate -
+# Holds "keep" after `gpu-vacate on --keep`: vacate again at every boot until `off`
+d /var/lib/gpu-vacate 0775 root gpu-vacate -

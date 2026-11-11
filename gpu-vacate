@@ -6,12 +6,15 @@
 # mutter's preferred primary GPU, and a systemd path unit re-runs udev when the flag
 # changes. Mutter picks its render GPU at login, so a switch needs a log out/in. The
 # output on the other GPU is turned off with gdctl, and the monitor is pointed at the
-# right input over DDC/CI (ddcutil). The flag lives in /run, so every boot starts normal.
+# right input over DDC/CI (ddcutil). The flag lives in /run, so every boot starts normal,
+# unless `on --keep` left a mark in /var/lib/gpu-vacate: then a boot service recreates it.
 set -euo pipefail
 
-VERSION=0.1.0
+VERSION=0.2.0
 CONF=${GPU_VACATE_CONF:-/etc/gpu-vacate.conf}
 RUNDIR=/run/gpu-vacate
+STATEDIR=/var/lib/gpu-vacate
+KEEP=$STATEDIR/keep
 TAG=mutter-device-preferred-primary
 
 # Defaults; see gpu-vacate.conf
@@ -24,10 +27,11 @@ FIRMWARE_INPUT=yes
 
 usage() {
   cat <<EOF
-Usage: gpu-vacate COMMAND
+Usage: gpu-vacate COMMAND [--keep]
 
   status    show the mode, the GPU the session renders on, and each GPU's VRAM use
   on        render the desktop on the iGPU and leave the discrete GPU(s) idle
+            --keep: stay vacated across reboots, until \`gpu-vacate off'
   off       render the desktop on the dGPU again
   inputs    show each connected output's DDC/CI bus and the monitor's current input
             code (for INPUT_DGPU and INPUT_IGPU in $CONF)
@@ -126,6 +130,7 @@ connected_output() {
 mutter_name() { local s=${1##*/}; s=${s#*-}; echo "${s/HDMI-A-/HDMI-}"; }
 
 vacated() { compgen -G "$RUNDIR/card*" >/dev/null; }
+kept() { [[ -e $KEEP ]]; }
 current_mode() { vacated && echo igpu || echo dgpu; }
 
 primary_scale() {
@@ -268,8 +273,14 @@ cmd_status() {
   main=
   [[ -n $desk ]] && { main=$(main_card "$desk") || main=; }
   sess=$(session_card) || sess=
-  if vacated; then echo "Mode:             vacated (desktop on the iGPU)"
-  else echo "Mode:             normal (desktop on the dGPU)"; fi
+  if vacated; then
+    echo "Mode:             vacated (desktop on the iGPU)$(kept && echo ', kept across reboots')"
+  elif kept; then
+    echo "Mode:             normal (desktop on the dGPU), but set to vacate at boot"
+    echo "                  (the boot restore failed? journalctl -b -u gpu-vacate-restore)"
+  else
+    echo "Mode:             normal (desktop on the dGPU)"
+  fi
   if [[ -z $sess ]]; then
     echo "Session renders:  unknown (no gnome-shell found)"
   else
@@ -319,11 +330,15 @@ EOF
 }
 
 cmd_switch() {
-  local target=$1 desk card ans
+  local target=$1 keep=$2 desk card ans
   command -v gdctl >/dev/null || die "gdctl not found; gpu-vacate needs GNOME 48 or newer"
   [[ ${XDG_SESSION_TYPE:-} == wayland ]] || warn "not a Wayland session; gpu-vacate only works with GNOME on Wayland"
   [[ -d $RUNDIR ]] || die "$RUNDIR is missing; install gpu-vacate first (sudo make install)"
   [[ -w $RUNDIR ]] || die "can't write to $RUNDIR; join the gpu-vacate group (sudo usermod -aG gpu-vacate $USER) and log in again"
+  if [[ $keep == yes && ! -w $STATEDIR ]]; then
+    [[ -d $STATEDIR ]] || die "$STATEDIR is missing; reinstall gpu-vacate (sudo make install)"
+    die "can't write to $STATEDIR; join the gpu-vacate group and log in again"
+  fi
   desk=$(desktop_card)
   card=$(card_for "$target")
   connected_output "$card" >/dev/null ||
@@ -331,6 +346,7 @@ cmd_switch() {
 
   rm -f "$RUNDIR"/card*
   if [[ $target == igpu ]]; then touch "$RUNDIR/$desk"; fi
+  set_keep "$keep" "$target"
   wait_for_tag "$target" "$desk"
   if apply_outputs "$target" persistent; then
     # GNOME only saves the layout once it's confirmed; logging out first discards it
@@ -354,12 +370,49 @@ cmd_switch() {
   if [[ $ans == [yY] ]]; then gnome-session-quit --logout --no-prompt; fi
 }
 
+# Remember (or forget) to vacate again at the next boot; see cmd_restore
+set_keep() {
+  if [[ $1 == yes ]]; then
+    touch "$KEEP" || die "can't write $KEEP"
+    echo "Vacated mode is kept across reboots, until: gpu-vacate off"
+  else
+    if kept; then rm -f "$KEEP" || die "can't remove $KEEP"; fi
+    [[ $2 == igpu ]] && echo "Vacated until the next reboot (gpu-vacate on --keep to keep it)"
+  fi
+  return 0
+}
+
+# Runs as root from gpu-vacate-restore.service at boot, before the login screen, when
+# `gpu-vacate on --keep` left $KEEP behind: recreate the flag in /run so GDM and the
+# session render on the desktop GPU. Card numbers can change between boots, so the card
+# is found again here. Always succeeds, so the login screen still starts.
+cmd_restore() {
+  local desk='' i
+  kept || return 0
+  # At boot the GPU drivers may still be probing
+  for i in {1..15}; do
+    desk=$(desktop_card 2>/dev/null) && connected_output "$desk" >/dev/null && break
+    desk=
+    sleep 1
+  done
+  if [[ -z $desk ]]; then
+    echo "No desktop GPU with a monitor connected found; starting in normal mode"
+    return 0
+  fi
+  mkdir -p "$RUNDIR"
+  rm -f "$RUNDIR"/card*
+  touch "$RUNDIR/$desk"
+  udevadm trigger --settle --subsystem-match=drm --sysname-match='card[0-9]*' --action=change
+  echo "Vacated mode kept: the desktop renders on $desk"
+}
+
 # Runs as root from gpu-vacate-firmware-input.service: point the monitor at the boot
 # GPU's input before the login screen starts ("boot") and after it stops ("shutdown"),
-# since the firmware, boot loader and other OSes only show on the boot GPU. Always
-# succeeds: if the boot run failed, systemd would skip the shutdown run.
+# since the firmware, boot loader and other OSes only show on the boot GPU. If the boot
+# restored a kept vacated mode, the boot run points it at the desktop GPU's input instead.
+# Always succeeds: if the boot run failed, systemd would skip the shutdown run.
 cmd_firmware_input() {
-  local c boot='' conn bus='' desk want i
+  local phase=${1:-shutdown} c boot='' conn bus='' desk dconn dbus want i
   [[ $FIRMWARE_INPUT == yes ]] || return 0
   # Only a manual (re)start or stop of the service, e.g. by make install/uninstall, can
   # find a vacated desktop still running (a real boot starts with an empty /run, and at
@@ -382,16 +435,37 @@ cmd_firmware_input() {
   done
   [[ -n $bus ]] || { echo "No monitor found on the boot GPU; leaving the input alone"; return 0; }
   desk=$(desktop_card 2>/dev/null) || desk=
+  if [[ $phase == boot && -n $desk ]] && vacated; then
+    # Same monitor on both cables: ask over the desktop GPU's bus first
+    [[ -n $INPUT_IGPU ]] || { echo "No input code set in $CONF; leaving the input alone"; return 0; }
+    local buses=("$bus")
+    dconn=$(connected_output "$desk") && dbus=$(ddc_bus "$dconn") && buses=("$dbus" "$bus")
+    set_input "$INPUT_IGPU" "${buses[@]}" &&
+      echo "Vacated mode kept: monitor on the desktop GPU's input ($INPUT_IGPU)"
+    return 0
+  fi
   [[ $boot == "$desk" ]] && want=$INPUT_IGPU || want=$INPUT_DGPU
   [[ -n $want ]] || { echo "No input code set in $CONF; leaving the input alone"; return 0; }
   set_input "$want" "$bus" && echo "Monitor on the boot GPU's input ($want, $(mutter_name "$conn"))"
   return 0
 }
 
+keep=no
+case ${1:-} in
+  on|igpu)
+    case ${2:-} in
+      '') ;;
+      -k|--keep) keep=yes ;;
+      *) usage >&2; exit 1 ;;
+    esac
+    (( $# <= 2 )) || { usage >&2; exit 1; } ;;
+  off|dgpu) (( $# == 1 )) || { usage >&2; exit 1; } ;;
+esac
+
 case ${1:-status} in
   status) cmd_status ;;
-  on|igpu) cmd_switch igpu ;;
-  off|dgpu) cmd_switch dgpu ;;
+  on|igpu) cmd_switch igpu "$keep" ;;
+  off|dgpu) cmd_switch dgpu no ;;
   inputs) cmd_inputs ;;
   sync)
     # Runs at login: fix the layout only if it's wrong, without the confirmation dialog
@@ -399,7 +473,8 @@ case ${1:-status} in
     apply_outputs "$(current_mode)" temporary || true
     switch_input "$(current_mode)" || true
     ;;
-  firmware-input) cmd_firmware_input || true ;;
+  firmware-input) cmd_firmware_input "${2:-}" || true ;;
+  restore) cmd_restore || true ;;
   version|--version) echo "gpu-vacate $VERSION" ;;
   -h|--help|help) usage ;;
   *) usage >&2; exit 1 ;;

@@ -7,6 +7,7 @@ when you're done.
 ```console
 $ gpu-vacate on      # desktop → iGPU (log out/in); the discrete GPU(s) sit idle
 $ gpu-vacate off     # desktop → dGPU again
+$ gpu-vacate on --keep   # same as on, but stays vacated across reboots until off
 ```
 
 It's for **desktop PCs** with one monitor cabled to both GPUs: for example DisplayPort
@@ -34,7 +35,9 @@ both GPUs. The compositor settings (mutter's udev tag, `KWIN_DRM_DEVICES`,
 - Switches the monitor's input over DDC/CI (optional, needs `ddcutil`).
 - Puts the monitor on the boot GPU's input at boot and shutdown, so the firmware setup,
   the boot loader and other operating systems are visible.
-- Starts every boot in normal mode (the flag lives in `/run`).
+- Starts every boot in normal mode (the flag lives in `/run`), unless you vacated with
+  `gpu-vacate on --keep`: then every boot comes up on the iGPU, monitor on its input,
+  until you run `gpu-vacate off`.
 
 ## Requirements
 
@@ -70,14 +73,16 @@ $ gpu-vacate on
 Packagers: `make install DESTDIR=… PREFIX=/usr UDEVRULESDIR=/usr/lib/udev/rules.d
 UNITDIR=/usr/lib/systemd/system BASHCOMPDIR=/usr/share/bash-completion/completions MANDIR=/usr/share/man`
 installs the files only; enable
-`gpu-vacate-trigger.path` and `gpu-vacate-firmware-input.service` in the package scripts.
+`gpu-vacate-trigger.path`, `gpu-vacate-restore.service` and
+`gpu-vacate-firmware-input.service` in the package scripts.
 
 ## Usage
 
 | Command | |
 |---|---|
 | `gpu-vacate status` | mode, the GPU the session renders on, each GPU's VRAM use and outputs |
-| `gpu-vacate on` | render the desktop on the iGPU |
+| `gpu-vacate on` | render the desktop on the iGPU, until the next reboot |
+| `gpu-vacate on --keep` | the same, and keep it on the iGPU across reboots until `off` |
 | `gpu-vacate off` | render the desktop on the dGPU |
 | `gpu-vacate inputs` | show the monitor's current input code on each connected output |
 | `gpu-vacate sync` | re-apply outputs and input for the current mode (runs at login) |
@@ -86,6 +91,12 @@ installs the files only; enable
 asks **"Keep these display settings?"**: click *Keep Changes* (it only saves the layout
 once confirmed), press Enter in the terminal, and log out when it offers to. After you
 log back in, `gpu-vacate status` should show the session on the new GPU.
+
+With `--keep`, `on` also leaves a mark in `/var/lib/gpu-vacate`. At each boot,
+`gpu-vacate-restore.service` then re-vacates before the login screen starts, and the
+monitor is switched to the iGPU's input (the firmware and boot loader still show on the
+boot GPU's input, as usual). `gpu-vacate off` clears it; running `gpu-vacate on` again (without
+`--keep`) makes it last only until the next reboot.
 
 ## Configuration
 
@@ -122,6 +133,9 @@ user. Elsewhere, join the `i2c` group.
 - `gdctl set --persistent` enables only the active GPU's output and saves it to
   `~/.config/monitors.xml`. A login autostart entry (`gpu-vacate sync`) fixes the layout
   temporarily if it doesn't match the mode, e.g. after rebooting while vacated.
+- `/var/lib/gpu-vacate/keep` (from `on --keep`) makes `gpu-vacate-restore.service`
+  recreate the flag at boot, before the login screen. It finds the iGPU again, since
+  card numbers can change between boots.
 - With the desktop on the iGPU, the dGPU only runs your compute jobs; a dGPU with nothing
   on it can runtime-suspend.
 

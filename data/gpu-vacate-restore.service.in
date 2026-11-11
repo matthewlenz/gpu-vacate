@@ -1,0 +1,17 @@
+# Recreates the vacated-mode flag at boot, before the login screen starts, when
+# `gpu-vacate on --keep` asked for it to last across reboots.
+[Unit]
+Description=Restore a kept vacated desktop GPU at boot (gpu-vacate)
+ConditionPathExists=/var/lib/gpu-vacate/keep
+RequiresMountsFor=/var/lib/gpu-vacate
+After=systemd-tmpfiles-setup.service systemd-udevd.service systemd-modules-load.service
+Before=display-manager.service gpu-vacate-firmware-input.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=@BINDIR@/gpu-vacate restore
+TimeoutSec=45
+
+[Install]
+WantedBy=graphical.target
